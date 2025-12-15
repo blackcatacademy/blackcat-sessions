@@ -1,0 +1,8 @@
+{
+  "slots": {
+    "core.vault": {"type": "aead", "key": "crypto_key", "length": 32},
+    "core.hmac.sessions.token": {"type": "hmac", "key": "crypto_key", "length": 32},
+    "core.hmac.sessions.ip": {"type": "hmac", "key": "crypto_key", "length": 32}
+  }
+}
+

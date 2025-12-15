@@ -1,0 +1,36 @@
+{
+  "tables": {
+    "users": {
+      "columns": {
+        "password_hash": {"strategy": "passthrough"},
+        "password_algo": {"strategy": "passthrough"}
+      }
+    },
+    "sessions": {
+      "columns": {
+        "token_hash": {
+          "strategy": "hmac",
+          "context": "core.hmac.sessions.token",
+          "encoding": "raw",
+          "write_key_version": true
+        },
+        "token_fingerprint": {"strategy": "passthrough"},
+        "token_issued_at": {"strategy": "passthrough"},
+        "user_id": {"strategy": "passthrough"},
+        "expires_at": {"strategy": "passthrough"},
+        "revoked": {"strategy": "passthrough"},
+        "ip_hash": {
+          "strategy": "hmac",
+          "context": "core.hmac.sessions.ip",
+          "encoding": "raw",
+          "write_key_version": true
+        },
+        "user_agent": {"strategy": "passthrough"},
+        "session_blob": {
+          "strategy": "encrypt",
+          "context": "core.vault"
+        }
+      }
+    }
+  }
+}
