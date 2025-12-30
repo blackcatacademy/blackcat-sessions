@@ -43,10 +43,8 @@ final class DbCachedSessionHandler implements \SessionHandlerInterface
         $this->cacheTtlSeconds = max(0, $cacheTtlSeconds);
         $this->sessions = new SessionRepository($db);
 
-        // Fail fast when encryption ingress is required.
-        if (IngressLocator::isRequired()) {
-            IngressLocator::requireAdapter();
-        }
+        // Fail fast: sessions are expected to run with DB crypto ingress enabled.
+        IngressLocator::requireAdapter();
     }
 
     private ?CacheInterface $cache;
@@ -218,10 +216,7 @@ final class DbCachedSessionHandler implements \SessionHandlerInterface
                 $this->sessions->insert($payload);
             }
         } catch (\Throwable $e) {
-            if (IngressLocator::isRequired()) {
-                throw $e;
-            }
-            return false;
+            throw $e;
         }
 
         if ($this->cache !== null) {
@@ -243,9 +238,7 @@ final class DbCachedSessionHandler implements \SessionHandlerInterface
             try {
                 $this->sessions->deleteById($rowId);
             } catch (\Throwable $e) {
-                if (IngressLocator::isRequired()) {
-                    throw $e;
-                }
+                throw $e;
             }
         }
 
@@ -325,17 +318,7 @@ final class DbCachedSessionHandler implements \SessionHandlerInterface
         }
 
         // Only cache when crypto ingress is available to ensure cache never stores plaintext sensitive data.
-        try {
-            $adapter = IngressLocator::adapter();
-        } catch (\Throwable $e) {
-            if (IngressLocator::isRequired()) {
-                throw $e;
-            }
-            return;
-        }
-        if ($adapter === null) {
-            return;
-        }
+        IngressLocator::requireAdapter();
 
         $ttl = $this->computeCacheTtlFromExpires(is_string($meta['expires_at'] ?? null) ? (string)$meta['expires_at'] : null);
         if ($ttl === 0) {
@@ -466,14 +449,7 @@ final class DbCachedSessionHandler implements \SessionHandlerInterface
             return null;
         }
 
-        try {
-            $adapter = IngressLocator::adapter();
-        } catch (\Throwable $e) {
-            if (IngressLocator::isRequired()) {
-                throw $e;
-            }
-            $adapter = null;
-        }
+        $adapter = IngressLocator::adapter();
 
         if ($adapter !== null && method_exists($adapter, 'decrypt')) {
             try {

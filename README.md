@@ -3,7 +3,7 @@
 `blackcat-sessions` je samostatný modul pro session logiku v ekosystému BlackCat.
 
 - DB-backed sessions přes `blackcat-database` (generated repositories).
-- Volitelný crypto ingress přes `blackcat-database-crypto` (HMAC pro lookup + šifrování `session_blob`).
+- Crypto ingress přes `blackcat-database-crypto` (HMAC pro lookup + šifrování `session_blob`, fail-closed).
 - Cíl: `blackcat-auth` ani `blackcat-core` nemusí mít vlastní session implementaci.
 
 ## Instalace
@@ -67,9 +67,10 @@ SessionManager::destroySession(Database::getInstance());
 
 ## Poznámky ke crypto ingress
 
-- Doporučené: nastavit `BLACKCAT_DB_ENCRYPTION_REQUIRED=1` a mít v mapě tabulku `sessions` pro:
-  - `token_hash` (HMAC)
-  - `ip_hash` (HMAC)
-  - `session_blob` (ENCRYPT)
+- V `blackcat-database` je šifrování/HMAC řešeno přes `IngressLocator` a mapy v `packages/*/schema/encryption-map.json` (single source of truth).
+- Pro běh je potřeba runtime config (doporučené přes `blackcat-config`) s minimem:
+  - `crypto.keys_dir` (required)
+  - `crypto.manifest` (optional; pro slot metadata / konzistenci)
+- V produkci je cílem držet klíče mimo web runtime (secrets-agent boundary), a runtime config mít mimo web docroot (např. `/etc/blackcat/config.runtime.json`).
 
 Roadmap: `docs/ROADMAP.md`.
