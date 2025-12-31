@@ -3,8 +3,10 @@ declare(strict_types=1);
 
 namespace BlackCat\Sessions\Tests\Integration;
 
+use BlackCat\Config\Runtime\Config as RuntimeConfig;
 use BlackCat\Core\Database;
 use BlackCat\Database\Crypto\IngressLocator;
+use BlackCat\DatabaseCrypto\Config\PackagesEncryptionMapLoader;
 use BlackCat\Database\Packages\Sessions\Repository\SessionRepository;
 use BlackCat\Database\Packages\Sessions\SessionsModule;
 use BlackCat\Database\Packages\Users\Repository\UserRepository;
@@ -27,15 +29,8 @@ final class DbCachedSessionHandlerIntegrationTest extends TestCase
     {
         parent::tearDown();
 
-        putenv('BLACKCAT_DB_ENCRYPTION_REQUIRED');
-        putenv('BLACKCAT_DB_CRYPTO_REQUIRED');
-        putenv('BLACKCAT_DB_ENCRYPTION_MAP');
-        putenv('BLACKCAT_KEYS_DIR');
-        putenv('BLACKCAT_CRYPTO_MANIFEST');
-
         if (class_exists(IngressLocator::class)) {
-            IngressLocator::setAdapter(null);
-            IngressLocator::configure(null, null);
+            IngressLocator::reset();
         }
     }
 
@@ -54,18 +49,7 @@ final class DbCachedSessionHandlerIntegrationTest extends TestCase
 
         $this->wipeTables($db, ['sessions', 'users']);
 
-        $mapPath = realpath(__DIR__ . '/../fixtures/encryption-map.json');
-        $keysFixtureDir = realpath(__DIR__ . '/../fixtures/keys');
-        $manifestPath = realpath(__DIR__ . '/../fixtures/manifest.json');
-        if ($mapPath === false || $keysFixtureDir === false || $manifestPath === false) {
-            self::fail('Test fixtures not available.');
-        }
-
-        $keysDir = $this->prepareKeysDir($keysFixtureDir);
-        putenv('BLACKCAT_CRYPTO_MANIFEST=' . $manifestPath);
-        putenv('BLACKCAT_DB_ENCRYPTION_REQUIRED=1');
-        IngressLocator::configure($mapPath, $keysDir);
-        self::assertNotNull(IngressLocator::adapter());
+        IngressLocator::requireAdapter();
 
         $userId = $this->createUser($db);
 
@@ -91,7 +75,7 @@ final class DbCachedSessionHandlerIntegrationTest extends TestCase
         $viewRow = $repo->getByTokenHash($sessionId, false);
         self::assertIsArray($viewRow);
         self::assertNotSame('', (string)($viewRow['token_hash_key_version'] ?? ''));
-        self::assertSame('crypto_key_v1.key', (string)($viewRow['token_hash_key_version'] ?? ''));
+        self::assertMatchesRegularExpression('/_v1\\.key$/', (string)($viewRow['token_hash_key_version'] ?? ''));
 
         $baseRow = $repo->findAllByIds([(int)$viewRow['id']])[0] ?? null;
         self::assertIsArray($baseRow);
@@ -101,13 +85,12 @@ final class DbCachedSessionHandlerIntegrationTest extends TestCase
         self::assertIsArray($storedBlobJson);
         self::assertArrayHasKey('local', $storedBlobJson);
         self::assertArrayHasKey('kms', $storedBlobJson);
-        self::assertSame('core.vault', (string)($storedBlobJson['context'] ?? ''));
+        self::assertSame('db.vault.sessions.session_blob', (string)($storedBlobJson['context'] ?? ''));
 
         // Simulate rotation: add v2 key and re-bootstrap ingress.
-        $this->rotateKeyInDir($keysDir);
-        IngressLocator::setAdapter(null);
-        IngressLocator::configure($mapPath, $keysDir);
-        self::assertNotNull(IngressLocator::adapter());
+        $this->rotateTokenHashKey();
+        IngressLocator::reset();
+        IngressLocator::requireAdapter();
 
         $repoAfterRotation = new SessionRepository($db);
         self::assertNull($repoAfterRotation->getByTokenHash($sessionId, false));
@@ -121,7 +104,8 @@ final class DbCachedSessionHandlerIntegrationTest extends TestCase
         self::assertTrue($handler->write($sessionId, $payload));
         $rehashRow = $repoAfterRotation->getByTokenHash($sessionId, false);
         self::assertIsArray($rehashRow);
-        self::assertSame('crypto_key_v2.key', (string)$rehashRow['token_hash_key_version']);
+        self::assertArrayHasKey('token_hash_key_version', $rehashRow);
+        self::assertMatchesRegularExpression('/_v2\\.key$/', (string)$rehashRow['token_hash_key_version']);
     }
 
     private function initDbOrFail(): Database
@@ -179,35 +163,58 @@ final class DbCachedSessionHandlerIntegrationTest extends TestCase
         }
     }
 
-    private function prepareKeysDir(string $fixtureDir): string
+    private function rotateTokenHashKey(): void
     {
-        $tmp = rtrim(sys_get_temp_dir(), '/\\') . '/blackcat-sessions-keys-' . bin2hex(random_bytes(6));
-        if (!mkdir($tmp, 0700, true) && !is_dir($tmp)) {
-            throw new \RuntimeException('Unable to create temp keys dir');
+        if (!RuntimeConfig::isInitialized()) {
+            throw new \RuntimeException('Runtime config must be initialized by the test bootstrap.');
         }
 
-        $src = rtrim($fixtureDir, '/\\') . '/crypto_key_v1.key';
-        $dst = $tmp . '/crypto_key_v1.key';
-        if (!is_file($src) || !copy($src, $dst)) {
-            throw new \RuntimeException('Unable to seed temp keys dir');
+        $map = PackagesEncryptionMapLoader::fromAutodetectedBlackcatDatabaseRoot();
+        $cols = $map->columnsFor('sessions') ?? [];
+        $spec = $cols['token_hash'] ?? $cols['TOKEN_HASH'] ?? null;
+        if (!is_array($spec)) {
+            throw new \RuntimeException('sessions.token_hash missing in encryption map (packages/*/schema/encryption-map.json)');
         }
 
-        return $tmp;
-    }
+        $context = $spec['context'] ?? null;
+        if (!is_string($context) || trim($context) === '') {
+            throw new \RuntimeException('sessions.token_hash has no context in encryption map');
+        }
 
-    private function rotateKeyInDir(string $keysDir): void
-    {
-        $keysDir = rtrim($keysDir, '/\\');
-        $path = $keysDir . '/crypto_key_v2.key';
+        $repo = RuntimeConfig::repo();
+        $keysDir = $repo->resolvePath($repo->requireString('crypto.keys_dir'));
+        $manifestPath = $repo->resolvePath($repo->requireString('crypto.manifest'));
+
+        $raw = file_get_contents($manifestPath);
+        if ($raw === false) {
+            throw new \RuntimeException('Unable to read manifest: ' . $manifestPath);
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded) || !is_array($decoded['slots'] ?? null)) {
+            throw new \RuntimeException('Invalid manifest JSON: ' . $manifestPath);
+        }
+
+        /** @var array<string,mixed> $slots */
+        $slots = $decoded['slots'];
+        $slot = $slots[$context] ?? null;
+        if (!is_array($slot)) {
+            throw new \RuntimeException('sessions.token_hash context is missing in manifest slots: ' . $context);
+        }
+
+        $keyBase = $slot['key'] ?? null;
+        $length = $slot['length'] ?? null;
+        if (!is_string($keyBase) || $keyBase === '' || !is_int($length) || $length <= 0) {
+            throw new \RuntimeException('Invalid slot definition for context ' . $context);
+        }
+
+        $path = rtrim($keysDir, '/\\') . '/' . $keyBase . '_v2.key';
         if (is_file($path)) {
             return;
         }
-        $key = "fedcba9876543210fedcba9876543210";
-        if (strlen($key) !== 32) {
-            throw new \RuntimeException('Invalid v2 key length in test');
+
+        if (file_put_contents($path, random_bytes($length)) === false) {
+            throw new \RuntimeException('Unable to write v2 key: ' . $path);
         }
-        if (file_put_contents($path, $key) === false) {
-            throw new \RuntimeException('Unable to write v2 key');
-        }
+        @chmod($path, 0600);
     }
 }
