@@ -22,7 +22,6 @@ final class DbCachedSessionHandler implements \SessionHandlerInterface
     private const DEFAULT_TABLE = 'sessions';
 
     private SessionRepository $sessions;
-    private string $tableName;
 
     public function __construct(
         private readonly Database $db,
@@ -38,7 +37,6 @@ final class DbCachedSessionHandler implements \SessionHandlerInterface
             throw new \InvalidArgumentException('DbCachedSessionHandler currently supports only table "sessions" (blackcat-database package).');
         }
 
-        $this->tableName = $tableName;
         $this->cache = $cache;
         $this->cacheTtlSeconds = max(0, $cacheTtlSeconds);
         $this->sessions = new SessionRepository($db);
@@ -464,7 +462,7 @@ final class DbCachedSessionHandler implements \SessionHandlerInterface
             }
         }
 
-        return $blob !== '' ? $blob : null;
+        return $blob;
     }
 
     private function convertPlainToSessionPayload(string $plain): ?string

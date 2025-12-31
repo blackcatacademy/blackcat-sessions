@@ -12,6 +12,28 @@
     "blackcatacademy/blackcat-core": "dev-dev",
     "blackcatacademy/blackcat-database": "dev-dev"
   },
+  "repositories": [
+    {
+      "type": "git",
+      "url": "https://github.com/blackcatacademy/blackcat-core"
+    },
+    {
+      "type": "git",
+      "url": "https://github.com/blackcatacademy/blackcat-config"
+    },
+    {
+      "type": "git",
+      "url": "https://github.com/blackcatacademy/blackcat-database"
+    },
+    {
+      "type": "git",
+      "url": "https://github.com/blackcatacademy/blackcat-database-crypto"
+    },
+    {
+      "type": "git",
+      "url": "https://github.com/blackcatacademy/blackcat-crypto"
+    }
+  ],
   "autoload": {
     "psr-4": {
       "BlackCat\\Sessions\\": "src/"

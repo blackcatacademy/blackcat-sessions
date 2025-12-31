@@ -40,7 +40,7 @@ jobs:
           --health-retries=10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -52,6 +52,11 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
 
+      - name: Init blackcat-database packages
+        run: |
+          git -C vendor/blackcatacademy/blackcat-database submodule update --init packages/sessions packages/session-audit packages/users
+          composer dump-autoload -o
+
       - name: Static analysis
         run: vendor/bin/phpstan analyse --configuration=phpstan.neon
 
@@ -61,4 +66,3 @@ jobs:
           DB_USER: ${{ matrix.db == 'mysql' && 'root' || 'postgres' }}
           DB_PASSWORD: ${{ matrix.db == 'mysql' && 'root' || 'postgres' }}
         run: vendor/bin/phpunit
-

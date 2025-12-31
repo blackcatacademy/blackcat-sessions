@@ -52,7 +52,7 @@ final class PhpSessionCodec
 
             $ok = false;
             for ($i = 1; $offset + $i <= $len; $i++) {
-                if (++$iters > $maxIterations) {
+                if (++$iters >= $maxIterations) {
                     return null;
                 }
 
@@ -115,7 +115,7 @@ final class PhpSessionCodec
 
     private static function safeUnserialize(string $data): mixed
     {
-        $prevHandler = set_error_handler(static function ($severity, $message, $file = null, $line = null): never {
+        set_error_handler(static function ($severity, $message, $file = null, $line = null): never {
             throw new \ErrorException((string)$message, 0, (int)$severity, (string)$file, (int)$line);
         });
 
@@ -124,12 +124,7 @@ final class PhpSessionCodec
         } catch (\Throwable) {
             return false;
         } finally {
-            if ($prevHandler !== null) {
-                set_error_handler($prevHandler);
-            } else {
-                restore_error_handler();
-            }
+            restore_error_handler();
         }
     }
 }
-

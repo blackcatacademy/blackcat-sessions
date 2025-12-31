@@ -18,6 +18,7 @@
         "token_issued_at": {"strategy": "passthrough"},
         "user_id": {"strategy": "passthrough"},
         "expires_at": {"strategy": "passthrough"},
+        "last_seen_at": {"strategy": "passthrough"},
         "revoked": {"strategy": "passthrough"},
         "ip_hash": {
           "strategy": "hmac",

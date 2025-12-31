@@ -58,7 +58,10 @@ final class RedisSessionStore implements SessionStoreInterface
 
     public function findBySubject(string $subject): array
     {
-        $ids = $this->redis->sMembers($this->subjectKey($subject)) ?: [];
+        $ids = $this->redis->sMembers($this->subjectKey($subject));
+        if (!is_array($ids)) {
+            $ids = [];
+        }
         $sessions = [];
         foreach ($ids as $id) {
             $record = $this->find((string)$id);
@@ -79,4 +82,3 @@ final class RedisSessionStore implements SessionStoreInterface
         return $this->prefix . ':subject:' . $subject;
     }
 }
-

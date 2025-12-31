@@ -12,14 +12,15 @@ use BlackCat\Database\Packages\Users\UsersModule;
 use BlackCat\Database\Support\BinaryCodec;
 use BlackCat\Sessions\SessionService;
 use BlackCat\Sessions\Store\DatabaseSessionStore;
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunClassInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Requires a real DB (MySQL/Postgres); skipped unless DB_DSN is provided.
- *
- * @runInSeparateProcess
- * @preserveGlobalState disabled
+ * Requires a real DB (MySQL/Postgres); fails if a DB is not reachable.
  */
+#[RunClassInSeparateProcess]
+#[PreserveGlobalState(false)]
 final class DatabaseSessionStoreIntegrationTest extends TestCase
 {
     protected function tearDown(): void
@@ -41,7 +42,7 @@ final class DatabaseSessionStoreIntegrationTest extends TestCase
 
     public function testDatabaseSessionStoreEndToEndWithCryptoIngress(): void
     {
-        $db = $this->initDbOrSkip();
+        $db = $this->initDbOrFail();
         $dialect = $db->dialect();
 
         // Postgres views use digest(...) => requires pgcrypto extension.
@@ -59,7 +60,7 @@ final class DatabaseSessionStoreIntegrationTest extends TestCase
         $keysFixtureDir = realpath(__DIR__ . '/../fixtures/keys');
         $manifestPath = realpath(__DIR__ . '/../fixtures/manifest.json');
         if ($mapPath === false || $keysFixtureDir === false || $manifestPath === false) {
-            self::markTestSkipped('Test fixtures not available.');
+            self::fail('Test fixtures not available.');
         }
 
         $keysDir = $this->prepareKeysDir($keysFixtureDir);
@@ -134,11 +135,11 @@ final class DatabaseSessionStoreIntegrationTest extends TestCase
         self::assertNull($svcAfterRotation->validate($issued->id));
     }
 
-    private function initDbOrSkip(): Database
+    private function initDbOrFail(): Database
     {
         $dsn = (string)(getenv('DB_DSN') ?: '');
         if ($dsn === '') {
-            self::markTestSkipped('Set DB_DSN to run integration tests (e.g., mysql:... or pgsql:...).');
+            self::fail('Integration tests require a real DB. Set DB_DSN/DB_USER/DB_PASSWORD (use a disposable test database).');
         }
 
         Database::init([
@@ -212,7 +213,7 @@ final class DatabaseSessionStoreIntegrationTest extends TestCase
         if (is_file($path)) {
             return;
         }
-        $key = "fedcba9876543210fedcba987654321";
+        $key = "fedcba9876543210fedcba9876543210";
         if (strlen($key) !== 32) {
             throw new \RuntimeException('Invalid v2 key length in test');
         }
