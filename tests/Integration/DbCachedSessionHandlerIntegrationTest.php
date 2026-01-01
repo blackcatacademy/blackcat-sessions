@@ -25,13 +25,31 @@ use PHPUnit\Framework\TestCase;
 #[PreserveGlobalState(false)]
 final class DbCachedSessionHandlerIntegrationTest extends TestCase
 {
+    private function resetIngressLocator(): void
+    {
+        if (!class_exists(IngressLocator::class)) {
+            return;
+        }
+
+        $ref = new \ReflectionClass(IngressLocator::class);
+
+        foreach (['reset', 'configure'] as $method) {
+            if ($ref->hasMethod($method)) {
+                $ref->getMethod($method)->invoke(null);
+                return;
+            }
+        }
+
+        if ($ref->hasMethod('setAdapter')) {
+            $ref->getMethod('setAdapter')->invoke(null, null);
+        }
+    }
+
     protected function tearDown(): void
     {
         parent::tearDown();
 
-        if (class_exists(IngressLocator::class)) {
-            IngressLocator::reset();
-        }
+        $this->resetIngressLocator();
     }
 
     public function testDbCachedSessionHandlerRoundTripAndRotation(): void
@@ -89,7 +107,7 @@ final class DbCachedSessionHandlerIntegrationTest extends TestCase
 
         // Simulate rotation: add v2 key and re-bootstrap ingress.
         $this->rotateTokenHashKey();
-        IngressLocator::reset();
+        $this->resetIngressLocator();
         IngressLocator::requireAdapter();
 
         $repoAfterRotation = new SessionRepository($db);

@@ -25,13 +25,31 @@ use PHPUnit\Framework\TestCase;
 #[PreserveGlobalState(false)]
 final class DatabaseSessionStoreIntegrationTest extends TestCase
 {
+    private function resetIngressLocator(): void
+    {
+        if (!class_exists(IngressLocator::class)) {
+            return;
+        }
+
+        $ref = new \ReflectionClass(IngressLocator::class);
+
+        foreach (['reset', 'configure'] as $method) {
+            if ($ref->hasMethod($method)) {
+                $ref->getMethod($method)->invoke(null);
+                return;
+            }
+        }
+
+        if ($ref->hasMethod('setAdapter')) {
+            $ref->getMethod('setAdapter')->invoke(null, null);
+        }
+    }
+
     protected function tearDown(): void
     {
         parent::tearDown();
 
-        if (class_exists(IngressLocator::class)) {
-            IngressLocator::reset();
-        }
+        $this->resetIngressLocator();
     }
 
     public function testDatabaseSessionStoreEndToEndWithCryptoIngress(): void
@@ -100,7 +118,7 @@ final class DatabaseSessionStoreIntegrationTest extends TestCase
 
         // Simulate key rotation: add v2 key and re-bootstrap ingress (new process behavior).
         $this->rotateTokenHashKey();
-        IngressLocator::reset();
+        $this->resetIngressLocator();
         IngressLocator::requireAdapter();
 
         // Post-rotation HMAC lookup should fail, but validate() must still work via fingerprint fallback.

@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+$repoRoot = dirname(__DIR__);
+$monorepoRoot = dirname($repoRoot);
+
+// Monorepo helper: prefer local blackcat-core when present (lets us validate core fixes before pushing).
+$localCoreDb = $monorepoRoot . '/blackcat-core/src/Database.php';
+if (is_file($localCoreDb)) {
+    require_once $localCoreDb;
+}
+
 $autoloadCandidates = [
     __DIR__ . '/../vendor/autoload.php',
     __DIR__ . '/../../blackcat-database/vendor/autoload.php',
@@ -20,6 +29,123 @@ foreach ($autoloadCandidates as $candidate) {
 if (!$autoloadFound) {
     throw new RuntimeException('Cannot find an autoloader; run composer install or use the monorepo vendor.');
 }
+
+/**
+ * Test-only guard rails:
+ * - Do not require a full TrustKernel (trust.web3) setup for DB integration tests in this repo.
+ * - Production deployments must bootstrap TrustKernel and lock guards; tests intentionally install permissive guards.
+ */
+if (class_exists('\\BlackCat\\Core\\Database')) {
+    if (is_callable(['\\BlackCat\\Core\\Database', 'setWriteGuard'])) {
+        \BlackCat\Core\Database::setWriteGuard(static function (string $_sql): void {});
+    }
+    if (is_callable(['\\BlackCat\\Core\\Database', 'setReadGuard'])) {
+        \BlackCat\Core\Database::setReadGuard(static function (string $_sql): void {});
+    }
+    if (is_callable(['\\BlackCat\\Core\\Database', 'setPdoAccessGuard'])) {
+        \BlackCat\Core\Database::setPdoAccessGuard(static function (string $_ctx): void {});
+    }
+}
+
+/**
+ * Helper to set env vars in a PHPUnit-friendly way.
+ */
+function bcsessions_tests_set_env(string $key, string $value): void
+{
+    if ($value === '') {
+        return;
+    }
+    putenv($key . '=' . $value);
+    $_ENV[$key] = $value;
+    $_SERVER[$key] = $value;
+}
+
+/**
+ * Auto-configure DB_DSN for DB integration tests when running on a known Docker network.
+ *
+ * This keeps integration tests fail-closed (they still fail if no DB is reachable),
+ * but avoids requiring manual env export for the common dev setup.
+ */
+function bcsessions_tests_autoconfigure_db_env(): void
+{
+    $dsn = getenv('DB_DSN');
+    if (is_string($dsn) && $dsn !== '') {
+        return;
+    }
+
+    $user = getenv('DB_USER');
+    if (!is_string($user) || $user === '') {
+        $user = (string)(getenv('BC_TEST_DB_USER') ?: '');
+    }
+
+    $pass = getenv('DB_PASSWORD');
+    if (!is_string($pass) || $pass === '') {
+        $pass = (string)(getenv('BC_TEST_DB_PASS') ?: '');
+    }
+
+    $dbName = getenv('DB_NAME');
+    if (!is_string($dbName) || $dbName === '') {
+        $dbName = (string)(getenv('BC_TEST_DB_NAME') ?: 'blackcat_test');
+    }
+
+    if (extension_loaded('pdo_mysql')) {
+        if ($user === '') {
+            $user = 'root';
+        }
+        if ($pass === '') {
+            $pass = 'root';
+        }
+
+        foreach (['bc-mysql-test', 'bc-mysql', 'mysql', 'mariadb'] as $host) {
+            $candidate = sprintf('mysql:host=%s;port=3306;dbname=%s;charset=utf8mb4', $host, $dbName);
+            try {
+                $options = [
+                    \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                    \PDO::ATTR_TIMEOUT => 1,
+                ];
+                if (defined('\\PDO::MYSQL_ATTR_CONNECT_TIMEOUT')) {
+                    $options[\PDO::MYSQL_ATTR_CONNECT_TIMEOUT] = 1;
+                }
+                $pdo = new \PDO($candidate, $user, $pass, $options);
+                $pdo->query('SELECT 1');
+
+                bcsessions_tests_set_env('DB_DSN', $candidate);
+                bcsessions_tests_set_env('DB_USER', $user);
+                bcsessions_tests_set_env('DB_PASSWORD', $pass);
+                return;
+            } catch (\Throwable) {
+            }
+        }
+    }
+
+    if (extension_loaded('pdo_pgsql')) {
+        if ($user === '') {
+            $user = 'postgres';
+        }
+        if ($pass === '') {
+            $pass = 'postgres';
+        }
+
+        foreach (['bc-postgres-test', 'bc-postgres', 'postgres'] as $host) {
+            $candidate = sprintf('pgsql:host=%s;port=5432;dbname=%s', $host, $dbName);
+            try {
+                $pdo = new \PDO($candidate, $user, $pass, [
+                    \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                    \PDO::ATTR_TIMEOUT => 1,
+                ]);
+                $pdo->query('SELECT 1');
+
+                bcsessions_tests_set_env('DB_DSN', $candidate);
+                bcsessions_tests_set_env('DB_USER', $user);
+                bcsessions_tests_set_env('DB_PASSWORD', $pass);
+                return;
+            } catch (\Throwable) {
+            }
+        }
+    }
+}
+
+bcsessions_tests_autoconfigure_db_env();
 
 function bcsessions_register_psr4(string $prefix, string $dir): void
 {
@@ -143,4 +269,11 @@ if (
     @chmod($runtimeConfigPath, 0600);
 
     \BlackCat\Config\Runtime\Config::initFromJsonFile($runtimeConfigPath);
+
+    // Compatibility bridge: some repos still ship an env-based ingress loader (vendor blackcat-database).
+    // Tests should work in both monorepo and standalone checkouts.
+    bcsessions_tests_set_env('BLACKCAT_KEYS_DIR', $keysDir);
+    bcsessions_tests_set_env('BLACKCAT_CRYPTO_MANIFEST', $manifestPath);
+    bcsessions_tests_set_env('BLACKCAT_DB_ENCRYPTION_MAP', 'packages');
+    bcsessions_tests_set_env('BLACKCAT_DB_CRYPTO_REQUIRED', '1');
 }
